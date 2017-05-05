@@ -3,9 +3,8 @@
 
 # In[1]:
 
-import requests,io,datetime,configparser
+import requests,datetime,configparser
 from IPython.display import display
-import pandas as pd
 
 
 # In[2]:
@@ -45,13 +44,17 @@ speciesR = requests.get(getBaseURL()+"&q="+speciesQ).json()
 
 # In[9]:
 
+numProcessed = 0
 for sgcnRecord in speciesR['features']:
     recordInfoPairs = '"registrationDate" => "'+dt+'"'
     recordInfoPairs = recordInfoPairs+',"SGCN_ScientificName_Submitted"=>"'+sgcnRecord['properties']['scientificname_submitted'].replace("\'","''")+'"'
     try:
         print (idsToTIR(recordInfoPairs))
+        numProcessed = numProcessed + 1
     except:
         print ("Problem with: "+recordInfoPairs)
+
+print ("Number Unique Names Processed: "+str(numProcessed))
 
 
 # In[ ]:
