@@ -25,7 +25,7 @@ def getBaseURL():
 
 # In[32]:
 
-sgcnTIR = requests.get(getBaseURL()+"&q=SELECT itis->'discoveredTSN' AS discoveredtsn, itis->'acceptedTSN' AS acceptedtsn, itis->'nameWOInd' AS scientificname_accepted, itis->'rank' AS rank, itis->'vernacular:English' AS commonname_accepted, registration->'SGCN_ScientificName_Submitted' AS scientificname_submitted FROM tir.tir2 WHERE itis->'itisMatchMethod' NOT LIKE 'NotMatched%' ORDER BY registration->'SGCN_ScientificName_Submitted'").json()
+sgcnTIR = requests.get(getBaseURL()+"&q=SELECT itis->'discoveredTSN' AS discoveredtsn, itis->'acceptedTSN' AS acceptedtsn, itis->'nameWOInd' AS scientificname_accepted, itis->'rank' AS rank, itis->'vernacular:English' AS commonname_accepted, registration->'SGCN_ScientificName_Submitted' AS scientificname_submitted FROM tir.tir2 WHERE itis->'itisMatchMethod' NOT LIKE 'NotMatched%' AND registration->'SGCN_ScientificName_Submitted' IN (SELECT scientificname_submitted FROM sgcn.sgcn WHERE scientificname_accepted IS NULL) ORDER BY registration->'SGCN_ScientificName_Submitted'").json()
 
 
 
