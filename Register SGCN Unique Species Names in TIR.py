@@ -49,7 +49,7 @@ for sgcnRecord in speciesR['features']:
     recordInfoPairs = '"registrationDate" => "'+dt+'"'
     recordInfoPairs = recordInfoPairs+',"SGCN_ScientificName_Submitted"=>"'+sgcnRecord['properties']['scientificname_submitted'].replace("\'","''")+'"'
     try:
-        print (idsToTIR(recordInfoPairs))
+        print (sgcnRecord['properties']['scientificname_submitted'], idsToTIR(recordInfoPairs))
         numProcessed = numProcessed + 1
     except:
         print ("Problem with: "+recordInfoPairs)

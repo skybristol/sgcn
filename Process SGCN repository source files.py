@@ -5,21 +5,21 @@
 # 
 # I use jupyter nbconvert to output this notebook to a python script and run it in its own environment to fully process the repository.
 
-# In[70]:
+# In[16]:
 
 import requests,io,configparser
 from IPython.display import display
 import pandas as pd
 
 
-# In[71]:
+# In[17]:
 
 # Get API keys and any other config details from a file that is external to the code.
 config = configparser.RawConfigParser()
 config.read_file(open(r'../config/stuff.py'))
 
 
-# In[72]:
+# In[18]:
 
 # Build base URL with API key using input from the external config.
 def getBaseURL():
@@ -28,27 +28,27 @@ def getBaseURL():
     return apiBaseURL
 
 
-# In[73]:
+# In[19]:
 
 def getCurrentRecordCount(sgcn_state,sgcn_year):
     r = requests.get(getBaseURL()+"&q=SELECT COUNT(*) AS sumstateyear FROM sgcn.sgcn WHERE sgcn_year="+str(sgcn_year)+" AND sgcn_state='"+sgcn_state+"'").json()
     return r["features"][0]["properties"]["sumstateyear"]
 
 
-# In[74]:
+# In[20]:
 
 def clearStateYear(sgcn_state,sgcn_year):
     return requests.get(getBaseURL()+"&q=DELETE FROM sgcn.sgcn WHERE sgcn_year="+str(sgcn_year)+" AND sgcn_state='"+sgcn_state+"'").json()
 
 
-# In[75]:
+# In[21]:
 
 def insertSGCNData(record):
     q = "INSERT INTO sgcn.sgcn (sourceid,sourcefilename,sourcefileurl,sgcn_state,sgcn_year,scientificname_submitted,commonname_submitted,taxonomicgroup_submitted,firstyear)         VALUES         ('"+record["sourceid"]+"','"+record["sourcefilename"]+"','"+record["sourcefileurl"]+"','"+record["sgcn_state"]+"',"+str(record["sgcn_year"])+",'"+record["scientificname_submitted"]+"','"+record["commonname_submitted"]+"','"+record["taxonomicgroup_submitted"]+"',"+str(record["firstyear"])+")"
     return requests.get(getBaseURL()+"&q="+q).json()
 
 
-# In[76]:
+# In[25]:
 
 def stringCleaning(string):
     # These are things found in the name strings that cause problems sending the data over the GC2 API to the database
@@ -56,17 +56,20 @@ def stringCleaning(string):
     string = string.replace("'","''")
     string = string.replace("--","")
     string = string.replace("&","and")
+    string = string.replace('"',"''")
+    string = string.replace(";",",")
+    string = string.replace("#","no.")
     return string
 
 
-# In[85]:
+# In[26]:
 
 # Query ScienceBase for all SGCN source items
 sbQ = "https://www.sciencebase.gov/catalog/items?parentId=56d720ece4b015c306f442d5&format=json&fields=files,tags,dates&max=100"
 sbR = requests.get(sbQ).json()
 
 
-# In[86]:
+totalRecordsInFiles = 0
 
 # Loop through the repository items and sync data to SGCN database
 for item in sbR["items"]:
@@ -106,9 +109,11 @@ for item in sbR["items"]:
     # Retrieve the file into a dataframe for processing
     # The read_table method with explicit tab separator seems to be pretty reliable and robust directly from ScienceBase file URLs, but this may have to be reexamined in future if it fails
     stateData = pd.read_table(thisItem["sourcefileurl"],sep='\t')
+    totalRecordsThisFile = len(stateData.index)
+    totalRecordsInFiles = totalRecordsInFiles + totalRecordsThisFile
 
     # Check the total columns in the source data against the starting record count from the database
-    if thisItem["startingrecordcount"] != len(stateData.index):
+    if thisItem["startingrecordcount"] != totalRecordsThisFile:
         # If the number of source records does not match the current database, clear out the database for reprocessing
         print (clearStateYear(thisItem["sgcn_state"],thisItem["sgcn_year"]))
         print ("Cleared data for: "+thisItem["sgcn_state"]+" - "+str(thisItem["sgcn_year"]))
@@ -153,7 +158,7 @@ for item in sbR["items"]:
             thisRecord["sgcn_year"] = thisItem["sgcn_year"]
             
             # Insert the record
-            insertSGCNData(thisRecord)
+            print(insertSGCNData(thisRecord))
         
         # Check total record count after inserting new data to make sure the numbers line up
         if thisItem["sourcerecordcount"] != getCurrentRecordCount(thisItem["sgcn_state"],thisItem["sgcn_year"]):
@@ -162,3 +167,5 @@ for item in sbR["items"]:
             print (thisItem["sgcn_state"],thisItem["sgcn_year"])
             print ("Source record count: "+str(thisItem["sourcerecordcount"]))
             print ("Database record count: "+str(getCurrentRecordCount(thisItem["sgcn_state"],thisItem["sgcn_year"])))
+    else:
+        print ("Record Numbers Matched: "+thisItem["sgcn_state"]+" - "+str(thisItem["sgcn_year"]))
