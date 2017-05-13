@@ -1,9 +1,9 @@
 
 # coding: utf-8
 
-# In[5]:
+# In[17]:
 
-import requests,configparser
+import requests,configparser,re
 from IPython.display import display
 
 
@@ -23,33 +23,39 @@ def getBaseURL():
     return apiBaseURL
 
 
-# In[32]:
+# In[20]:
 
-sgcnTIR = requests.get(getBaseURL()+"&q=SELECT itis->'discoveredTSN' AS discoveredtsn, itis->'acceptedTSN' AS acceptedtsn, itis->'nameWOInd' AS scientificname_accepted, itis->'rank' AS rank, itis->'vernacular:English' AS commonname_accepted, registration->'SGCN_ScientificName_Submitted' AS scientificname_submitted FROM tir.tir2 WHERE itis->'itisMatchMethod' NOT LIKE 'NotMatched%' AND registration->'SGCN_ScientificName_Submitted' IN (SELECT scientificname_submitted FROM sgcn.sgcn WHERE scientificname_accepted IS NULL) ORDER BY registration->'SGCN_ScientificName_Submitted'").json()
+sgcnTIR = requests.get(getBaseURL()+"&q=SELECT itis->'discoveredTSN' AS discoveredtsn, itis->'acceptedTSN' AS acceptedtsn, itis->'nameWInd' AS namewind, itis->'rank' AS rank, itis->'vernacular:English' AS vernacularenglish, registration->'SGCN_ScientificName_Submitted' AS scientificname_submitted, itis FROM tir.tir2 WHERE itis->'itisMatchMethod' NOT LIKE 'NotMatched%' AND registration->'SGCN_ScientificName_Submitted' NOT IN (SELECT scientificname_submitted FROM sgcn.sgcn WHERE taxonomicauthorityid IS NOT NULL) ORDER BY registration->'SGCN_ScientificName_Submitted'").json()
 
 
 
-# In[48]:
+# In[26]:
 
 for feature in sgcnTIR["features"]:
-    tsn = "http://services.itis.gov/?q=tsn:"+str(feature["properties"]["discoveredtsn"])
+
+    thisRecord = {}
+    thisRecord["scientificname"] = feature["properties"]["namewind"].replace("'","''")
+    thisRecord["tsn"] = "http://services.itis.gov/?q=tsn:"+str(feature["properties"]["discoveredtsn"])
+    thisRecord["rank"] = feature["properties"]["rank"]
+    thisRecord["scientificname_submitted"] = feature["properties"]["scientificname_submitted"].replace("'","''")
+    thisRecord["commonname"] = ""
+
     if type(feature["properties"]["acceptedtsn"]) is str and feature["properties"]["acceptedtsn"] != feature["properties"]["discoveredtsn"]:
-        tsn = "http://services.itis.gov/?q=tsn:"+str(feature["properties"]["acceptedtsn"])
+        thisRecord["tsn"] = "http://services.itis.gov/?q=tsn:"+str(feature["properties"]["acceptedtsn"])
+        m = re.search('\"'+thisRecord["rank"]+'\"\=\>\"(.+?)\"', feature["properties"]["itis"])
+        if m:
+            thisRecord["scientificname"] = m.group(1)
 
-    if type(feature["properties"]["commonname_accepted"]) is str:
-        commonname = feature["properties"]["commonname_accepted"].replace("'","''")
+    if type(feature["properties"]["vernacularenglish"]) is str:
+        thisRecord["commonname"] = feature["properties"]["vernacularenglish"].replace("'","''")
     else:
-        commonname = ""
+        try:
+            r = requests.get(getBaseURL()+"&q=SELECT commonname_submitted FROM sgcn.sgcn WHERE scientificname_submitted = '"+thisRecord["scientificname_submitted"]+"' LIMIT 1").json()
+            thisRecord["commonname"] = r["features"][0]["properties"]["commonname_submitted"].replace("'","''")
+        except:
+            pass
     
-    scientificname_accepted = feature["properties"]["scientificname_accepted"].replace("'","''")
-    scientificname_submitted = feature["properties"]["scientificname_submitted"].replace("'","''")
-    
-    print (requests.get(getBaseURL()+"&q=UPDATE sgcn.sgcn SET taxonomicauthorityid_accepted='"+tsn+"', scientificname_accepted='"+scientificname_accepted+"', commonname_accepted='"+commonname+"', taxonomicauthority_rank='"+feature["properties"]["rank"]+"' WHERE scientificname_submitted='"+scientificname_submitted+"'").json())
+    print (requests.get(getBaseURL()+"&q=UPDATE sgcn.sgcn SET taxonomicauthorityid='"+thisRecord["tsn"]+"', scientificname_display='"+thisRecord["scientificname"]+"', commonname_display='"+thisRecord["commonname"]+"', taxonomicauthorityrank='"+thisRecord["rank"]+"' WHERE scientificname_submitted='"+thisRecord["scientificname_submitted"]+"'").json())
     
     
-
-
-# In[ ]:
-
-
 
