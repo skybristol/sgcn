@@ -5,21 +5,21 @@
 # 
 # I use jupyter nbconvert to output this notebook to a python script and run it in its own environment to fully process the repository.
 
-# In[16]:
+# In[1]:
 
 import requests,io,configparser
 from IPython.display import display
 import pandas as pd
 
 
-# In[17]:
+# In[2]:
 
 # Get API keys and any other config details from a file that is external to the code.
 config = configparser.RawConfigParser()
 config.read_file(open(r'../config/stuff.py'))
 
 
-# In[18]:
+# In[3]:
 
 # Build base URL with API key using input from the external config.
 def getBaseURL():
@@ -28,46 +28,61 @@ def getBaseURL():
     return apiBaseURL
 
 
-# In[19]:
+# In[4]:
 
 def getCurrentRecordCount(sgcn_state,sgcn_year):
     r = requests.get(getBaseURL()+"&q=SELECT COUNT(*) AS sumstateyear FROM sgcn.sgcn WHERE sgcn_year="+str(sgcn_year)+" AND sgcn_state='"+sgcn_state+"'").json()
     return r["features"][0]["properties"]["sumstateyear"]
 
 
-# In[20]:
+# In[5]:
 
 def clearStateYear(sgcn_state,sgcn_year):
     return requests.get(getBaseURL()+"&q=DELETE FROM sgcn.sgcn WHERE sgcn_year="+str(sgcn_year)+" AND sgcn_state='"+sgcn_state+"'").json()
 
 
-# In[21]:
+# In[6]:
 
 def insertSGCNData(record):
     q = "INSERT INTO sgcn.sgcn (sourceid,sourcefilename,sourcefileurl,sgcn_state,sgcn_year,scientificname_submitted,commonname_submitted,taxonomicgroup_submitted,firstyear)         VALUES         ('"+record["sourceid"]+"','"+record["sourcefilename"]+"','"+record["sourcefileurl"]+"','"+record["sgcn_state"]+"',"+str(record["sgcn_year"])+",'"+record["scientificname_submitted"]+"','"+record["commonname_submitted"]+"','"+record["taxonomicgroup_submitted"]+"',"+str(record["firstyear"])+")"
     return requests.get(getBaseURL()+"&q="+q).json()
 
 
-# In[25]:
+# In[7]:
 
-def stringCleaning(string):
-    # These are things found in the name strings that cause problems sending the data over the GC2 API to the database
-    # It might be faster to do this with regex
-    string = string.replace("'","''")
-    string = string.replace("--","")
-    string = string.replace("&","and")
-    string = string.replace('"',"''")
-    string = string.replace(";",",")
-    string = string.replace("#","no.")
-    return string
+def stringCleaning(text):
+    import re
+
+    # Specify replacements
+    replacements = {}
+    replacements["'"] = "''"
+    replacements["--"] = ""
+    replacements["&"] = "and"
+    replacements['"'] = "''"
+    replacements[";"] = ","
+    replacements["#"] = "no."
+    
+    # Compile the expressions
+    regex = re.compile("(%s)" % "|".join(map(re.escape, replacements.keys())))
+
+    # Strip the text
+    text = text.strip()
+
+    # Process replacements
+    return regex.sub(lambda mo: replacements[mo.string[mo.start():mo.end()]], text)
 
 
-# In[26]:
+# In[22]:
 
 # Query ScienceBase for all SGCN source items
 sbQ = "https://www.sciencebase.gov/catalog/items?parentId=56d720ece4b015c306f442d5&format=json&fields=files,tags,dates&max=100"
 sbR = requests.get(sbQ).json()
 
+
+# In[ ]:
+
+# Set a list of states and years to reprocess
+reprocessList = ["District of Columbia/2005","Georgia/2005","Guam/2005","Hawaii/2005","Idaho/2005","Illinois/2005","Massachusetts/2005","Mississippi/2005","Nevada/2005","New Mexico/2005","North Carolina/2005","Ohio/2005","Oklahoma/2005","Puerto Rico/2005","South Carolina/2005","Tennessee/2005","Texas/2005","Vermont/2005","Washington/2005","Wisconsin/2005","Wyoming/2005"]
 
 totalRecordsInFiles = 0
 
@@ -113,7 +128,8 @@ for item in sbR["items"]:
     totalRecordsInFiles = totalRecordsInFiles + totalRecordsThisFile
 
     # Check the total columns in the source data against the starting record count from the database
-    if thisItem["startingrecordcount"] != totalRecordsThisFile:
+    # Also check to see if the state/year are explicitly in a list to reprocess for this run
+    if thisItem["startingrecordcount"] != totalRecordsThisFile or thisItem["sgcn_state"]+"/"+str(thisItem["sgcn_year"]) in reprocessList:
         # If the number of source records does not match the current database, clear out the database for reprocessing
         print (clearStateYear(thisItem["sgcn_state"],thisItem["sgcn_year"]))
         print ("Cleared data for: "+thisItem["sgcn_state"]+" - "+str(thisItem["sgcn_year"]))
@@ -141,9 +157,9 @@ for item in sbR["items"]:
 
             thisRecord["taxonomicgroup_submitted"] = ""
             if 'taxonomy group' in stateData.columns:
-                thisRecord["taxonomicgroup_submitted"] = row['taxonomy group']
-            elif 'taxonomic group' in stateData.columns:
-                thisRecord["taxonomicgroup_submitted"] = row['taxonomic group']
+                thisRecord["taxonomicgroup_submitted"] = stringCleaning(row['taxonomy group'])
+            elif 'taxonomic category' in stateData.columns:
+                thisRecord["taxonomicgroup_submitted"] = stringCleaning(row['taxonomic category'])
 
             thisRecord["firstyear"] = False
             if '2005 swap' in stateData.columns:
@@ -169,3 +185,11 @@ for item in sbR["items"]:
             print ("Database record count: "+str(getCurrentRecordCount(thisItem["sgcn_state"],thisItem["sgcn_year"])))
     else:
         print ("Record Numbers Matched: "+thisItem["sgcn_state"]+" - "+str(thisItem["sgcn_year"]))
+    
+    
+
+
+# In[ ]:
+
+
+
