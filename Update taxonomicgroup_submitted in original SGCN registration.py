@@ -1,6 +1,8 @@
 
 # coding: utf-8
 
+# This notebook updates the registration info in the TIR for SGCN records to include the submitted taxonomic group. This property needs to be added to the original processing script as well. I did this so that we can put a step into the process that builds out new values we want to apply for taxonomic grouping to species that are aligned with taxonomic authorities.
+
 # In[1]:
 
 import requests,configparser
@@ -23,15 +25,15 @@ def getBaseURL():
     return apiBaseURL
 
 
-# In[9]:
+# In[14]:
 
-r = requests.get(getBaseURL()+"&q=SELECT scientificname_submitted, taxonomicgroup_submitted FROM sgcn.sgcn WHERE taxonomicgroup_submitted <> '' ORDER BY taxonomicgroup_submitted").json()
+notFilled = requests.get(getBaseURL()+"&q=SELECT t.gid, s.taxonomicgroup_submitted FROM tir.tir2 t JOIN sgcn.sgcn s ON s.scientificname_submitted = t.registration->'SGCN_ScientificName_Submitted' WHERE s.taxonomicgroup_submitted <> '' AND not exist (t.registration,'taxonomicgroup_submitted')").json()
 
-for feature in r["features"]:
+for feature in notFilled["features"]:
     tg = '"taxonomicgroup_submitted"=>"'+feature["properties"]["taxonomicgroup_submitted"]+'"'
-    display (requests.get(getBaseURL()+"&q=UPDATE tir.tir2 SET registration = registration || '"+tg+"' :: hstore WHERE registration->'SGCN_ScientificName_Submitted' = '"+feature["properties"]["scientificname_submitted"]+"' AND NOT EXIST(registration, 'taxonomicgroup_submitted')").json())
-    
-    
+    q = "UPDATE tir.tir2 SET registration = registration || '"+tg+"' :: hstore WHERE gid = "+str(feature["properties"]["gid"])
+    print (q)
+    print (requests.get(getBaseURL()+"&q="+q).json())
 
 
 # In[ ]:
