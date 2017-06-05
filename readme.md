@@ -11,6 +11,12 @@ The following code is mostly working here. Everything else is still under develo
 * Process SGCN repository source files (notebook and separate script) - This code works through the ScienceBase collection for SWAP source files, checks to see if the data are already in the system, reprocesses as configured, and syncs the data in our online GC2 instance with the data from the source files.
 * Register SGCN Unique Species Names in TIR (notebook and separate script) - This code grabs up all unique species names from the SGCN data that have not been previously registered in the TIR, packages up registration informaiton, and inserts the data into the TIR for further processing.
 
+## Transition between GC2 environments
+
+We're currently in a transition on the SGCN data from one instance of the GeoCloud2 (GC2) environment to another. We started experimenting with the mapcentia.com instance because they were good enough to offer it to us for free and not limit what we could work against. We've now set up a new instance as part of our DataDistillery framework on the ESIP Testbed and are starting to transition code to hit that platform instead. For a while, some of the codes in this repo will continue working against the Mapcentia instance, but we'll get them all cut over once we have all of the data spun up on the DataDistillery instance.
+
+As we are working the code toward that new instance, we are making some adjustments based on what capability the new platform affords. That includes changing some table names and property names that might play a slight bit of havoc on anyone who coupled things too tightly to the old structures. For the most part, we're trying to use PostgreSQL views and associated ElasticSearch indexes as a layer of abstraction between the somewhat fluid underlying data management/production environment and the distribution data for web apps and other uses.
+
 ## Provisional Software Disclaimer
 Under USGS Software Release Policy, the software codes here are considered preliminary, not released officially, and posted to this repo for informal sharing among colleagues.
 
