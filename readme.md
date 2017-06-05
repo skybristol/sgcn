@@ -1,6 +1,15 @@
 # SGCN Processing
 
-This repository contains code for processing the data that USGS integrates and synthesizes for the State Species of Greatest Conservation Need. The scripts here start from the [repository](https://www.sciencebase.gov/catalog/item/56d720ece4b015c306f442d5) for original source data collected from the states and stored in ScienceBase. Data are processed into a still experimental online data system we are experimenting with via an API. You'll find the API functionality here, but the codes will not run without a referenced config file containing details and not posted online.
+This repository contains code for processing the data that USGS integrates and synthesizes for the State Species of Greatest Conservation Need. The scripts here start from the [repository](https://www.sciencebase.gov/catalog/item/56d720ece4b015c306f442d5) for original source data collected from the states and stored in ScienceBase. Data are processed into a still experimental online data system we are experimenting with via an API.
+
+Much of the processing in these notebooks is now dependent on modules from the bis and bis2 packages. The bis package can be found under the same usgs-bcb org on GitHub. The bis2 package contains sensitive information and is available elsewhere.
+
+## Current working stuff
+
+The following code is mostly working here. Everything else is still under development and may or may not work for you.
+
+* Process SGCN repository source files (notebook and separate script) - This code works through the ScienceBase collection for SWAP source files, checks to see if the data are already in the system, reprocesses as configured, and syncs the data in our online GC2 instance with the data from the source files.
+* Register SGCN Unique Species Names in TIR (notebook and separate script) - This code grabs up all unique species names from the SGCN data that have not been previously registered in the TIR, packages up registration informaiton, and inserts the data into the TIR for further processing.
 
 ## Provisional Software Disclaimer
 Under USGS Software Release Policy, the software codes here are considered preliminary, not released officially, and posted to this repo for informal sharing among colleagues.
