@@ -1,60 +1,71 @@
 
 # coding: utf-8
 
+# This process registeres unique species names from the SGCN source data into the Taxonomic Information Registry. The process is all based on pulling unique species names that are then examined via TIR processes to find matches with taxonomic authorities. Those decisions on taxonomic matching are used to create a nationally synthesized list of taxa that states have listed as Species of Greatest Conservation Need.
+# 
+# Registration consists of a set of key/value pairs that are inserted into the registration property of the TIR table. An hstore column in PostgreSQL of key/value pairs is used in order to accommodate different registration vectors having varying attributes. Every registration has the following:
+# * source - Logical name specifying the source of the registration ("SGCN" in this case)
+# * registrationDate - Date/time stamp of the registration
+# 
+# Most TIR registrations will have a "scientificname" property containing the name string used as a primary identifier. Some TIR registrations will have other identifiers that come from source material.
+# 
+# SGCN registrations include a list of common names and taxonomic groups supplied by the state and pulled together with an array_agg function and a DISTINCT operator to create a list of unique values in a string. These values can then be reasoned on in TIR processing.
+
 # In[1]:
 
-import requests,datetime,configparser
-from IPython.display import display
+get_ipython().magic('reload_ext autoreload')
 
+import requests,datetime
+from IPython.display import display
+from bis import tir
+from bis2 import gc2
+
+
+# ### Get data to process
+# 
+# This script gathers all of the unique taxonomic names (scientificname_submitted) from the SGCN data and registers them with the Taxonomic Information Registry. The query checks to make sure the taxon name is not already registered in the TIR.
 
 # In[2]:
 
-# Get API keys and any other config details from a file that is external to the code.
-config = configparser.RawConfigParser()
-config.read_file(open(r'../config/stuff.py'))
+q_sgcn = "SELECT scientificname_submitted scientificname,     array_to_string(array_agg(DISTINCT CASE WHEN commonname_submitted <> '' THEN commonname_submitted ELSE NULL END),',') commonnames,     array_to_string(array_agg(DISTINCT CASE WHEN taxonomicgroup_submitted <> '' THEN taxonomicgroup_submitted ELSE NULL END),',') taxonomicgroups     FROM sgcn.sgcn     WHERE scientificname_submitted <> ''     AND scientificname_submitted NOT IN (        SELECT registration->'scientificname' AS scientificname_submitted         FROM tir.tir         WHERE registration->'Source' = 'SGCN'     )     GROUP BY scientificname_submitted"
+r_sgcn = requests.get(gc2.sqlAPI("DataDistillery","BCB")+"&q="+q_sgcn).json()
 
-dt = datetime.datetime.utcnow().isoformat()
 
+# ### Iterate over the data and process to TIR
+# 
+# This block iterates over the unique species returned, packages up the data for the registration, and inserts them into the TIR table. It requires the following:
+# 
+# * TIR table set up in the appropriate GC2-basede data schema
+# * Registration field in the TIR table using the hstore data type
+# * gc2 module from the BIS2 package (connection info for the API)
+# * tir module from the BIS package (function to insert registration info)
 
 # In[3]:
 
-# Build base URL with API key using input from the external config.
-def getBaseURL():
-    gc2APIKey = config.get('apiKeys','apiKey_GC2_BCB').replace('"','')
-    apiBaseURL = "https://gc2.mapcentia.com/api/v1/sql/bcb?key="+gc2APIKey
-    return apiBaseURL
+recordCount = 0
 
+for sgcn in r_sgcn['features']:
+    recordInfoPairs = '"registrationDate" => "'+datetime.datetime.utcnow().isoformat()+'"'
 
-# In[4]:
+    # Set source to indicate data coming from the SGCN system
+    recordInfoPairs = recordInfoPairs+',"source"=>"SGCN"'
 
-# Basic function to insert registration info pairs into TIR
-def idsToTIR(recordInfoPairs):
-    # Build query string
-    insertSQL = "INSERT INTO tir.tir2 (registration) VALUES ('"+recordInfoPairs+"')"
-    # Execute query
-    response = requests.get(getBaseURL()+"&q="+insertSQL).json()
-    return response
+    # Set the scientific name string - a common point of registration into the TIR (was formerly "SGCN_ScientificName_Submitted")
+    recordInfoPairs = recordInfoPairs+',"scientificname"=>"'+sgcn['properties']['scientificname'].replace("\'","''")+'"'
 
+    # Set a list of the unique common names that are associated with the scientific name
+    recordInfoPairs = recordInfoPairs+',"commonnames"=>"'+sgcn['properties']['commonnames'].replace("\'","''")+'"'
 
-# In[8]:
+    # Set a list of the unique taxonomic groups (something specific to the SGCN) that are associated with the scientific name
+    recordInfoPairs = recordInfoPairs+',"taxonomicgroups"=>"'+sgcn['properties']['taxonomicgroups']+'"'
 
-speciesQ = "SELECT DISTINCT scientificname_submitted FROM sgcn.sgcn     WHERE scientificname_submitted <> ''     AND scientificname_submitted NOT IN     (SELECT registration -> 'SGCN_ScientificName_Submitted' AS scientificname_submitted FROM tir.tir2)     ORDER BY scientificname_submitted"
-speciesR = requests.get(getBaseURL()+"&q="+speciesQ).json()
-
-
-# In[9]:
-
-numProcessed = 0
-for sgcnRecord in speciesR['features']:
-    recordInfoPairs = '"registrationDate" => "'+dt+'"'
-    recordInfoPairs = recordInfoPairs+',"SGCN_ScientificName_Submitted"=>"'+sgcnRecord['properties']['scientificname_submitted'].replace("\'","''")+'"'
     try:
-        print (sgcnRecord['properties']['scientificname_submitted'], idsToTIR(recordInfoPairs))
-        numProcessed = numProcessed + 1
-    except:
-        print ("Problem with: "+recordInfoPairs)
+        print (sgcn['properties']['scientificname'], tir.tirRegistration(gc2.sqlAPI("DataDistillery","BCB"),recordInfoPairs))
+        recordCount = recordCount + 1
+    except Exception as e:
+        print (e)
 
-print ("Number Unique Names Processed: "+str(numProcessed))
+print ("Unique records processed: "+str(recordCount))
 
 
 # In[ ]:

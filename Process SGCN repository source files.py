@@ -3,87 +3,63 @@
 
 # This notebook provides code that processes the [SGCN/SWAP repository in ScienceBase](https://www.sciencebase.gov/catalog/item/56d720ece4b015c306f442d5) into the SGCN database in the GC2 instance we are experimenting with. It works through all of the items in the repo, grabs the source data file, checks the source data file record count against the current database, wipes the current database for that state/year if there's a problem, inserts all records from the source file, and verifies that the new record count matches.
 # 
+# ### Updates (5/30/2017)
+# * I fixed a dumb problem where "taxonomy category" was not getting picked up and processed as "taxonomic_group".
+# * I added in a process to check for a list of states to reprocess explicitly in addition to those whose record count does not match source data. This enabled me to clean up an issue where some of the states didn't get their taxonomic group processed properly.
+# * I changed the method of detecting the file to operate on and set it up to look first for an update file. If no processable file is found, the script breaks out of the ScienceBase source item and moves on to the next one.
+# 
 # I use jupyter nbconvert to output this notebook to a python script and run it in its own environment to fully process the repository.
 
 # In[1]:
 
-import requests,io,configparser
+import requests,io
 from IPython.display import display
 import pandas as pd
 
+from bis import bis
+from bis import sgcn
+from bis2 import gc2
+
+
+# ### Set parameters for the process being run
+# 
+# A number of parameters are needed for the particular process being run through this script. We build a local dictionary to reference, mostly from functions in the BIS-specific modules.
 
 # In[2]:
 
-# Get API keys and any other config details from a file that is external to the code.
-config = configparser.RawConfigParser()
-config.read_file(open(r'../config/stuff.py'))
+thisRun = {}
+thisRun["instance"] = "DataDistillery"
+thisRun["db"] = "BCB"
+thisRun["baseURL"] = gc2.sqlAPI(thisRun["instance"],thisRun["db"])
+thisRun["numberTests"] = 1
+thisRun["reprocessList"] = ["Arizona/2015"]
 
+
+# ### Get data for processing
+# 
+# The following section runs a query against ScienceBase for all of the items in the SWAP (SGCN) collection. We grab files, tags, and dates because we need to work against all three of those parts of the item structure.
+# 
+# * Tags - gives us the state name that supplied the list
+# * Dates - gives us the year of the SGCN report via the "Collected" date
+# * Files - gives us the file URL to access for processing (either an update or the original file)
+# 
+# Note: This process might need to change if we end up with more than 100 items in the source repository. It might also change when we get to the point of submitting data along the DataDistillery messaging system.
 
 # In[3]:
-
-# Build base URL with API key using input from the external config.
-def getBaseURL():
-    gc2APIKey = config.get('apiKeys','apiKey_GC2_BCB').replace('"','')
-    apiBaseURL = "https://gc2.mapcentia.com/api/v1/sql/bcb?key="+gc2APIKey
-    return apiBaseURL
-
-
-# In[4]:
-
-def getCurrentRecordCount(sgcn_state,sgcn_year):
-    r = requests.get(getBaseURL()+"&q=SELECT COUNT(*) AS sumstateyear FROM sgcn.sgcn WHERE sgcn_year="+str(sgcn_year)+" AND sgcn_state='"+sgcn_state+"'").json()
-    return r["features"][0]["properties"]["sumstateyear"]
-
-
-# In[5]:
-
-def clearStateYear(sgcn_state,sgcn_year):
-    return requests.get(getBaseURL()+"&q=DELETE FROM sgcn.sgcn WHERE sgcn_year="+str(sgcn_year)+" AND sgcn_state='"+sgcn_state+"'").json()
-
-
-# In[6]:
-
-def insertSGCNData(record):
-    q = "INSERT INTO sgcn.sgcn (sourceid,sourcefilename,sourcefileurl,sgcn_state,sgcn_year,scientificname_submitted,commonname_submitted,taxonomicgroup_submitted,firstyear)         VALUES         ('"+record["sourceid"]+"','"+record["sourcefilename"]+"','"+record["sourcefileurl"]+"','"+record["sgcn_state"]+"',"+str(record["sgcn_year"])+",'"+record["scientificname_submitted"]+"','"+record["commonname_submitted"]+"','"+record["taxonomicgroup_submitted"]+"',"+str(record["firstyear"])+")"
-    return requests.get(getBaseURL()+"&q="+q).json()
-
-
-# In[7]:
-
-def stringCleaning(text):
-    import re
-
-    # Specify replacements
-    replacements = {}
-    replacements["'"] = "''"
-    replacements["--"] = ""
-    replacements["&"] = "and"
-    replacements['"'] = "''"
-    replacements[";"] = ","
-    replacements["#"] = "no."
-    
-    # Compile the expressions
-    regex = re.compile("(%s)" % "|".join(map(re.escape, replacements.keys())))
-
-    # Strip the text
-    text = text.strip()
-
-    # Process replacements
-    return regex.sub(lambda mo: replacements[mo.string[mo.start():mo.end()]], text)
-
-
-# In[22]:
 
 # Query ScienceBase for all SGCN source items
 sbQ = "https://www.sciencebase.gov/catalog/items?parentId=56d720ece4b015c306f442d5&format=json&fields=files,tags,dates&max=100"
 sbR = requests.get(sbQ).json()
 
 
-# In[ ]:
+# ### Run the ScienceBase items through the process
+# 
+# This section uses a number of functions from the tir and sgcn modules to process each item returned in the ScienceBase query. There is probably some other stuff here that could be broken out into more generalized functions.
 
-# Set a list of states and years to reprocess
-reprocessList = ["District of Columbia/2005","Georgia/2005","Guam/2005","Hawaii/2005","Idaho/2005","Illinois/2005","Massachusetts/2005","Mississippi/2005","Nevada/2005","New Mexico/2005","North Carolina/2005","Ohio/2005","Oklahoma/2005","Puerto Rico/2005","South Carolina/2005","Tennessee/2005","Texas/2005","Vermont/2005","Washington/2005","Wisconsin/2005","Wyoming/2005"]
+# In[6]:
 
+numberItemsProcessed = 0
+numberRecordsInserted = 0
 totalRecordsInFiles = 0
 
 # Loop through the repository items and sync data to SGCN database
@@ -110,17 +86,27 @@ for item in sbR["items"]:
             break
     
     # Retrieve the current record count in the SGCN database for the state and year
-    thisItem["startingrecordcount"] = getCurrentRecordCount(thisItem["sgcn_state"],thisItem["sgcn_year"])
+    thisItem["startingrecordcount"] = sgcn.getCurrentRecordCount(thisRun["baseURL"],thisItem["sgcn_state"],thisItem["sgcn_year"])
     
     # Extract the file we need to process from the files structure
-    # Break after we find that file - assumes there is only one original file to process
-    # Still need to deal with the update files
-    for file in item["files"]:
-        if file["title"] == "Process ready version of original file":
-            thisItem["sourcefilename"] = file["name"]
-            thisItem["sourcefileurl"] = file["url"]
-            break
-            
+    # First look for an update file and process that one. Otherwise get the original file.
+    updateFile = next((file for file in item["files"] if file["title"] == "Process ready version of updated file"), None)
+    if updateFile is not None:
+        processFile = updateFile
+    else:
+        newFile = next((file for file in item["files"] if file["title"] == "Process ready version of original file"), None)
+        if newFile is not None:
+            processFile = newFile
+        else:
+            processFile = None
+
+    if processFile is not None:
+        thisItem["sourcefilename"] = processFile["name"]
+        thisItem["sourcefileurl"] = processFile["url"]
+    else:
+        print ("Problem getting file prepared: "+thisItem["sourceid"])
+        break   
+    
     # Retrieve the file into a dataframe for processing
     # The read_table method with explicit tab separator seems to be pretty reliable and robust directly from ScienceBase file URLs, but this may have to be reexamined in future if it fails
     stateData = pd.read_table(thisItem["sourcefileurl"],sep='\t')
@@ -129,9 +115,9 @@ for item in sbR["items"]:
 
     # Check the total columns in the source data against the starting record count from the database
     # Also check to see if the state/year are explicitly in a list to reprocess for this run
-    if thisItem["startingrecordcount"] != totalRecordsThisFile or thisItem["sgcn_state"]+"/"+str(thisItem["sgcn_year"]) in reprocessList:
+    if thisItem["startingrecordcount"] != totalRecordsThisFile or thisItem["sgcn_state"]+"/"+str(thisItem["sgcn_year"]) in thisRun["reprocessList"]:
         # If the number of source records does not match the current database, clear out the database for reprocessing
-        print (clearStateYear(thisItem["sgcn_state"],thisItem["sgcn_year"]))
+        print (sgcn.clearStateYear(thisRun["baseURL"],thisItem["sgcn_state"],thisItem["sgcn_year"]))
         print ("Cleared data for: "+thisItem["sgcn_state"]+" - "+str(thisItem["sgcn_year"]))
     
         # Store the source record count for reference
@@ -148,18 +134,18 @@ for item in sbR["items"]:
             if type(row['scientific name']) is float:
                 thisRecord["scientificname_submitted"] = ""
             else:
-                thisRecord["scientificname_submitted"] = stringCleaning(row['scientific name'])
+                thisRecord["scientificname_submitted"] = bis.stringCleaning(row['scientific name'])
 
             if type(row['common name']) is float:
                 thisRecord["commonname_submitted"] = ""
             else:
-                thisRecord["commonname_submitted"] = stringCleaning(row['common name'])
+                thisRecord["commonname_submitted"] = bis.stringCleaning(row['common name'])
 
             thisRecord["taxonomicgroup_submitted"] = ""
             if 'taxonomy group' in stateData.columns:
-                thisRecord["taxonomicgroup_submitted"] = stringCleaning(row['taxonomy group'])
+                thisRecord["taxonomicgroup_submitted"] = bis.stringCleaning(row['taxonomy group'])
             elif 'taxonomic category' in stateData.columns:
-                thisRecord["taxonomicgroup_submitted"] = stringCleaning(row['taxonomic category'])
+                thisRecord["taxonomicgroup_submitted"] = bis.stringCleaning(row['taxonomic category'])
 
             thisRecord["firstyear"] = False
             if '2005 swap' in stateData.columns:
@@ -174,19 +160,27 @@ for item in sbR["items"]:
             thisRecord["sgcn_year"] = thisItem["sgcn_year"]
             
             # Insert the record
-            print(insertSGCNData(thisRecord))
+            print(sgcn.insertSGCNData(thisRun["baseURL"],thisRecord))
+            numberRecordsInserted = numberRecordsInserted + 1
         
         # Check total record count after inserting new data to make sure the numbers line up
-        if thisItem["sourcerecordcount"] != getCurrentRecordCount(thisItem["sgcn_state"],thisItem["sgcn_year"]):
+        if thisItem["sourcerecordcount"] != sgcn.getCurrentRecordCount(thisRun["baseURL"],thisItem["sgcn_state"],thisItem["sgcn_year"]):
             print ("Something went wrong with "+thisItem["sgcn_state"],thisItem["sgcn_year"],thisItem["sourceid"])
         else:
             print (thisItem["sgcn_state"],thisItem["sgcn_year"])
             print ("Source record count: "+str(thisItem["sourcerecordcount"]))
-            print ("Database record count: "+str(getCurrentRecordCount(thisItem["sgcn_state"],thisItem["sgcn_year"])))
+            print ("Database record count: "+str(sgcn.getCurrentRecordCount(thisRun["baseURL"],thisItem["sgcn_state"],thisItem["sgcn_year"])))
+        
+        numberItemsProcessed = numberItemsProcessed + 1
     else:
         print ("Record Numbers Matched: "+thisItem["sgcn_state"]+" - "+str(thisItem["sgcn_year"]))
     
-    
+    if numberItemsProcessed == thisRun["numberTests"]:
+        break
+        
+print ("Number items processed: "+str(numberItemsProcessed))
+print ("Total records in files: "+str(totalRecordsInFiles))
+print ("Number records inserted: "+str(numberRecordsInserted))
 
 
 # In[ ]:
