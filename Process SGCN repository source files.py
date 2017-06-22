@@ -10,7 +10,7 @@
 # 
 # I use jupyter nbconvert to output this notebook to a python script and run it in its own environment to fully process the repository.
 
-# In[1]:
+# In[22]:
 
 import requests,io
 from IPython.display import display
@@ -25,14 +25,14 @@ from bis2 import gc2
 # 
 # A number of parameters are needed for the particular process being run through this script. We build a local dictionary to reference, mostly from functions in the BIS-specific modules.
 
-# In[2]:
+# In[23]:
 
 thisRun = {}
 thisRun["instance"] = "DataDistillery"
 thisRun["db"] = "BCB"
 thisRun["baseURL"] = gc2.sqlAPI(thisRun["instance"],thisRun["db"])
-thisRun["numberTests"] = 1
-thisRun["reprocessList"] = ["Arizona/2015"]
+thisRun["numberTests"] = 100
+thisRun["extraCriteria"] = ""
 
 
 # ### Get data for processing
@@ -45,10 +45,10 @@ thisRun["reprocessList"] = ["Arizona/2015"]
 # 
 # Note: This process might need to change if we end up with more than 100 items in the source repository. It might also change when we get to the point of submitting data along the DataDistillery messaging system.
 
-# In[3]:
+# In[24]:
 
 # Query ScienceBase for all SGCN source items
-sbQ = "https://www.sciencebase.gov/catalog/items?parentId=56d720ece4b015c306f442d5&format=json&fields=files,tags,dates&max=100"
+sbQ = "https://www.sciencebase.gov/catalog/items?parentId=56d720ece4b015c306f442d5&format=json&fields=files,tags,dates&max=100"+thisRun["extraCriteria"]
 sbR = requests.get(sbQ).json()
 
 
@@ -56,7 +56,7 @@ sbR = requests.get(sbQ).json()
 # 
 # This section uses a number of functions from the tir and sgcn modules to process each item returned in the ScienceBase query. There is probably some other stuff here that could be broken out into more generalized functions.
 
-# In[6]:
+# In[26]:
 
 numberItemsProcessed = 0
 numberRecordsInserted = 0
@@ -115,7 +115,7 @@ for item in sbR["items"]:
 
     # Check the total columns in the source data against the starting record count from the database
     # Also check to see if the state/year are explicitly in a list to reprocess for this run
-    if thisItem["startingrecordcount"] != totalRecordsThisFile or thisItem["sgcn_state"]+"/"+str(thisItem["sgcn_year"]) in thisRun["reprocessList"]:
+    if thisItem["startingrecordcount"] != totalRecordsThisFile:
         # If the number of source records does not match the current database, clear out the database for reprocessing
         print (sgcn.clearStateYear(thisRun["baseURL"],thisItem["sgcn_state"],thisItem["sgcn_year"]))
         print ("Cleared data for: "+thisItem["sgcn_state"]+" - "+str(thisItem["sgcn_year"]))
@@ -125,6 +125,12 @@ for item in sbR["items"]:
     
         # Set column names to lower case to deal with pesky human problems
         stateData.columns = map(str.lower, stateData.columns)
+        stateData.columns = map(str.strip, stateData.columns)
+        
+        # Create a list of duplicate index values in the Scientific Names so that we keep everything but make them all unique
+        scientificNames = stateData["scientific name"]
+        duplicateNamesList = stateData[scientificNames.isin(scientificNames[scientificNames.duplicated()])].index.tolist()
+        duplicateCount = 0
         
         thisRecord = {}
     
@@ -134,7 +140,13 @@ for item in sbR["items"]:
             if type(row['scientific name']) is float:
                 thisRecord["scientificname_submitted"] = ""
             else:
-                thisRecord["scientificname_submitted"] = bis.stringCleaning(row['scientific name'])
+                thisRecord["scientificname_submitted"] = row["scientific name"]
+
+            if index in duplicateNamesList:
+                duplicateCount = duplicateCount + 1
+                thisRecord["scientificname_submitted"] = thisRecord["scientificname_submitted"]+" "+str(duplicateCount)
+                    
+            thisRecord["scientificname_submitted"] = bis.stringCleaning(thisRecord["scientificname_submitted"])
 
             if type(row['common name']) is float:
                 thisRecord["commonname_submitted"] = ""
