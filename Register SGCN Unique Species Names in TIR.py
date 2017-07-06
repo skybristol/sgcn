@@ -11,79 +11,88 @@
 # 
 # SGCN registrations include a list of common names and taxonomic groups supplied by the state and pulled together with an array_agg function and a DISTINCT operator to create a list of unique values in a string. These values can then be reasoned on in TIR processing. The code to register names in the TIR from the SGCN table could operate at any time there are new names showing up in the SGCN, but we might miss some of the aggregated common names when new state data is processed. To deal with this, we could set up a process to periodically check the SGCN records for new instances of a given name and reaggregate common names and taxonomic groups.
 
-# In[42]:
+# In[30]:
 
-import requests,datetime
+import requests
+import json
+from datetime import datetime
 from IPython.display import display
 from bis import tir
+from bis import bis
 from bis2 import gc2
 
 
-# ### Get data to process
-# 
-# This script gathers all of the unique taxonomic names (scientificname_submitted) from the SGCN data and registers them with the Taxonomic Information Registry. The query checks to make sure the taxon name is not already registered in the TIR.
+# In[32]:
 
-# In[43]:
+# Set up the actions/targets for this particular instance
+thisRun = {}
+thisRun["instance"] = "DataDistillery"
+thisRun["db"] = "BCB"
+thisRun["baseURL"] = gc2.sqlAPI(thisRun["instance"],thisRun["db"])
+thisRun["commitToDB"] = True
+thisRun["totalRecordsToProcess"] = 5000
+thisRun["totalRecordsProcessed"] = 0
 
-q_sgcn = "SELECT scientificname_submitted scientificname,     array_to_string(array_agg(DISTINCT CASE WHEN commonname_submitted <> '' THEN commonname_submitted ELSE NULL END),',') commonnames,     array_to_string(array_agg(DISTINCT CASE WHEN sgcn_state <> '' THEN sgcn_state ELSE NULL END),',') sgcnstates,     array_to_string(array_agg(DISTINCT CASE WHEN taxonomicgroup_submitted <> '' THEN taxonomicgroup_submitted ELSE NULL END),',') taxonomicgroups     FROM sgcn.sgcn     WHERE scientificname_submitted NOT IN (        SELECT registration->'scientificname' AS scientificname_submitted         FROM tir.tir         WHERE registration->'Source' = 'SGCN'     )     GROUP BY scientificname_submitted"
-r_sgcn = requests.get(gc2.sqlAPI("DataDistillery","BCB")+"&q="+q_sgcn).json()
+numberWithoutTIRData = 1
 
+while numberWithoutTIRData == 1 and thisRun["totalRecordsProcessed"] < thisRun["totalRecordsToProcess"]:
 
-# ### Iterate over the data and process to TIR
-# 
-# This block iterates over the unique species returned, packages up the data for the registration, and inserts them into the TIR table. It requires the following:
-# 
-# * TIR table set up in the appropriate GC2-basede data schema
-# * Registration field in the TIR table using the hstore data type
-# * gc2 module from the BIS2 package (connection info for the API)
-# * tir module from the BIS package (function to insert registration info)
+    q_recordToSearch = "SELECT scientificname_submitted scientificname,         array_to_string(array_agg(DISTINCT CASE WHEN commonname_submitted <> '' THEN commonname_submitted ELSE NULL END),',') commonnames,         array_to_string(array_agg(DISTINCT CASE WHEN taxonomicgroup_submitted <> '' THEN taxonomicgroup_submitted ELSE NULL END),',') taxonomicgroups,         array_to_string(array_agg(sgcn_state || '/' || sgcn_year),',') stateyear         FROM sgcn.sgcn         WHERE scientificname_submitted NOT IN         (SELECT registration->>'scientificname' AS scientificname FROM tir.tir WHERE registration->>'source' = 'SGCN')         GROUP BY scientificname_submitted         LIMIT 1"
+    recordToSearch = requests.get(gc2.sqlAPI("DataDistillery","BCB")+"&q="+q_recordToSearch).json()
+    
+    numberWithoutTIRData = len(recordToSearch["features"])
+    
+    if numberWithoutTIRData == 1:
+        thisRegistration = {}
+        thisRegistration["source"] = "SGCN"
+        thisRegistration["registrationDate"] = datetime.utcnow().isoformat()
+        thisRegistration["taxonomicLookupProperty"] = "scientificname"
+        thisRegistration["followTaxonomy"] = True
 
-# In[44]:
+        tirRecord = recordToSearch["features"][0]
+        thisRegistration["scientificname"] = tirRecord['properties']['scientificname'].replace("\'","''")
+        tirRecord = recordToSearch["features"][0]
+    
+        if tirRecord["properties"]["commonnames"] is not None:
+            thisRegistration["commonnames"] = []
+            for commonName in tirRecord["properties"]["commonnames"].split(","):
+                thisCommonName = {}
+                thisCommonName["commonname"] = bis.stringCleaning(commonName)
+                thisRegistration["commonnames"].append(thisCommonName)
 
-recordCount = 0
+        if tirRecord["properties"]["taxonomicgroups"] is not None:
+            thisRegistration["taxonomicgroups"] = []
+            for taxonomicGroup in tirRecord["properties"]["taxonomicgroups"].split(","):
+                thisTaxonomicGroup = {}
+                thisTaxonomicGroup["taxonomicgroup"] = taxonomicGroup
+                thisRegistration["taxonomicgroups"].append(thisTaxonomicGroup)
 
-for sgcn in r_sgcn['features']:
-    recordInfoPairs = '"registrationDate" => "'+datetime.datetime.utcnow().isoformat()+'"'
+        if tirRecord["properties"]["stateyear"] is not None:
+            thisRegistration["stateyear"] = []
+            for stateYear in tirRecord["properties"]["stateyear"].split(","):
+                thisStateYear = {}
+                thisStateYear["state"] = stateYear.split("/")[0]
+                thisStateYear["year"] = stateYear.split("/")[1]
+                thisRegistration["stateyear"].append(thisStateYear)
+            
 
-    # Set source to indicate data coming from the SGCN system
-    recordInfoPairs = recordInfoPairs+',"source"=>"SGCN"'
-
-    # Set properties to configure taxonomic lookup rules
-    recordInfoPairs = recordInfoPairs+',"taxonomicLookupProperty"=>"scientificname"'
-    recordInfoPairs = recordInfoPairs+',"followTaxonomy"=>"true"'
-
-    # Set the scientific name string - a common point of registration into the TIR (was formerly "SGCN_ScientificName_Submitted")
-    recordInfoPairs = recordInfoPairs+',"scientificname"=>"'+sgcn['properties']['scientificname'].replace("\'","''")+'"'
-
-    # Set a list of the unique common names that are associated with the scientific name
-    recordInfoPairs = recordInfoPairs+',"commonnames"=>"'+sgcn['properties']['commonnames'].replace("\'","''")+'"'
-
-    # Set a list of the unique taxonomic groups (something specific to the SGCN) that are associated with the scientific name
-    recordInfoPairs = recordInfoPairs+',"taxonomicgroups"=>"'+sgcn['properties']['taxonomicgroups']+'"'
-
-    # Set a list of the states that reported this scientific name
-    recordInfoPairs = recordInfoPairs+',"sgcnstates"=>"'+sgcn['properties']['sgcnstates']+'"'
-
-    try:
-        print (sgcn['properties']['scientificname'], tir.tirRegistration(gc2.sqlAPI("DataDistillery","BCB"),recordInfoPairs))
-        recordCount = recordCount + 1
-    except Exception as e:
-        print (e)
-
-print ("Unique records processed: "+str(recordCount))
+        display (thisRegistration)
+        if thisRun["commitToDB"]:
+            print (tir.tirRegistration(gc2.sqlAPI("DataDistillery","BCB"),json.dumps(thisRegistration)))
+        thisRun["totalRecordsProcessed"] = thisRun["totalRecordsProcessed"] + 1
 
 
 # ### Final Check
 # 
 # Check that the total number of SGCN registrations in the TIR match the total unique number of names in the SGCN table.
 
-# In[41]:
+# In[33]:
 
 q_uniqueSGCNNames = "SELECT COUNT(*) AS num FROM (SELECT DISTINCT scientificname_submitted FROM sgcn.sgcn) AS temp"
 r_uniqueSGCNNames = requests.get(gc2.sqlAPI("DataDistillery","BCB")+"&q="+q_uniqueSGCNNames).json()
 print ("Total number distinct SGCN scientific names: "+str(r_uniqueSGCNNames["features"][0]["properties"]["num"]))
 
-q_tirRegisteredSGCNNames = "SELECT COUNT(*) AS num FROM tir.tir WHERE registration->'source' = 'SGCN'"
+q_tirRegisteredSGCNNames = "SELECT COUNT(*) AS num FROM tir.tir WHERE registration->>'source' = 'SGCN'"
 r_tirRegisteredSGCNNames = requests.get(gc2.sqlAPI("DataDistillery","BCB")+"&q="+q_tirRegisteredSGCNNames).json()
 print ("Total number SGCN scientific names in TIR: "+str(r_tirRegisteredSGCNNames["features"][0]["properties"]["num"]))
 
