@@ -26,17 +26,18 @@ from bis2 import gc2
 # 
 # A number of parameters are needed for the particular process being run through this script. We build a local dictionary to reference, mostly from functions in the BIS-specific modules.
 
-# In[5]:
+# In[9]:
 
 thisRun = {}
 thisRun["instance"] = "DataDistillery"
 thisRun["db"] = "BCB"
 thisRun["baseURL"] = gc2.sqlAPI(thisRun["instance"],thisRun["db"])
-thisRun["extraCriteria"] = "&q=Oregon+2015"
-thisRun["reprocessList"] = ["Hawaii/2015"]
+thisRun["extraCriteria"] = ""
+thisRun["reprocessList"] = []
 thisRun["numberItemsProcessed"] = 0
 thisRun["numberRecordsInserted"] = 0
 thisRun["totalRecordsInFiles"] = 0
+thisRun["commitItems"] = True
 
 
 # ### Get data for processing
@@ -49,10 +50,10 @@ thisRun["totalRecordsInFiles"] = 0
 # 
 # Note: This process might need to change if we end up with more than 100 items in the source repository. It might also change when we get to the point of submitting data along the DataDistillery messaging system.
 
-# In[6]:
+# In[10]:
 
 # Query ScienceBase for all SGCN source items
-sbQ = "https://www.sciencebase.gov/catalog/items?parentId=56d720ece4b015c306f442d5&format=json&fields=files,tags,dates&max=100"+thisRun["extraCriteria"]
+sbQ = "https://www.sciencebase.gov/catalog/items?parentId=56d720ece4b015c306f442d5&format=json&fields=files,tags,dates&max=100&sort=lastUpdated&order=desc"+thisRun["extraCriteria"]
 sbR = requests.get(sbQ).json()
 
 
@@ -60,7 +61,7 @@ sbR = requests.get(sbQ).json()
 # 
 # This section uses a number of functions from the tir and sgcn modules to process each item returned in the ScienceBase query. There is probably some other stuff here that could be broken out into more generalized functions.
 
-# In[7]:
+# In[11]:
 
 # Loop through the repository items and sync data to SGCN database
 for item in sbR["items"]:
@@ -86,7 +87,7 @@ for item in sbR["items"]:
             break
     
     # Stop this item if we did not get a date
-    if "sgcn_year" not in thisItem.keys():
+    if "sgcn_year" not in list(thisItem.keys()):
         break
     else:
         thisItem["stateYear"] = thisItem["sgcn_state"]+"/"+str(thisItem["sgcn_year"])
@@ -128,6 +129,10 @@ for item in sbR["items"]:
         thisItem["conditionsMet"].append(thisItem["stateYear"]+" in Reprocess List")
 
     if len(thisItem["conditionsMet"]) > 0:
+        if not thisRun["commitItems"]:
+            display (thisItem)
+            break
+
         thisItem["actionLog"] = []
         
         # Clear out the database for reprocessing
@@ -187,7 +192,7 @@ for item in sbR["items"]:
             thisRecord["sgcn_year"] = thisItem["sgcn_year"]
             
             # Insert the record
-            sgcn.insertSGCNData(thisRun["baseURL"],thisRecord)
+            print (sgcn.insertSGCNData(thisRun["baseURL"],thisRecord))
             thisRun["numberRecordsInserted"] = thisRun["numberRecordsInserted"] + 1
         
         # Check total record count after inserting new data to make sure the numbers line up
