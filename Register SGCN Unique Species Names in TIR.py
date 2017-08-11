@@ -11,7 +11,7 @@
 # 
 # SGCN registrations include a list of common names and taxonomic groups supplied by the state and pulled together with an array_agg function and a DISTINCT operator to create a list of unique values in a string. These values can then be reasoned on in TIR processing. The code to register names in the TIR from the SGCN table could operate at any time there are new names showing up in the SGCN, but we might miss some of the aggregated common names when new state data is processed. To deal with this, we could set up a process to periodically check the SGCN records for new instances of a given name and reaggregate common names and taxonomic groups.
 
-# In[30]:
+# In[1]:
 
 import requests
 import json
@@ -22,7 +22,7 @@ from bis import bis
 from bis2 import gc2
 
 
-# In[32]:
+# In[2]:
 
 # Set up the actions/targets for this particular instance
 thisRun = {}
@@ -30,15 +30,15 @@ thisRun["instance"] = "DataDistillery"
 thisRun["db"] = "BCB"
 thisRun["baseURL"] = gc2.sqlAPI(thisRun["instance"],thisRun["db"])
 thisRun["commitToDB"] = True
-thisRun["totalRecordsToProcess"] = 5000
+thisRun["totalRecordsToProcess"] = 1000
 thisRun["totalRecordsProcessed"] = 0
 
 numberWithoutTIRData = 1
 
 while numberWithoutTIRData == 1 and thisRun["totalRecordsProcessed"] < thisRun["totalRecordsToProcess"]:
 
-    q_recordToSearch = "SELECT scientificname_submitted scientificname,         array_to_string(array_agg(DISTINCT CASE WHEN commonname_submitted <> '' THEN commonname_submitted ELSE NULL END),',') commonnames,         array_to_string(array_agg(DISTINCT CASE WHEN taxonomicgroup_submitted <> '' THEN taxonomicgroup_submitted ELSE NULL END),',') taxonomicgroups,         array_to_string(array_agg(sgcn_state || '/' || sgcn_year),',') stateyear         FROM sgcn.sgcn         WHERE scientificname_submitted NOT IN         (SELECT registration->>'scientificname' AS scientificname FROM tir.tir WHERE registration->>'source' = 'SGCN')         GROUP BY scientificname_submitted         LIMIT 1"
-    recordToSearch = requests.get(gc2.sqlAPI("DataDistillery","BCB")+"&q="+q_recordToSearch).json()
+    q_recordToSearch = "SELECT scientificname_submitted scientificname         FROM sgcn.sgcn         WHERE scientificname_submitted NOT IN         (SELECT registration->>'scientificname' AS scientificname FROM tir.tir WHERE registration->>'source' = 'SGCN')         GROUP BY scientificname_submitted         LIMIT 1"
+    recordToSearch = requests.get(thisRun["baseURL"]+"&q="+q_recordToSearch).json()
     
     numberWithoutTIRData = len(recordToSearch["features"])
     
@@ -53,29 +53,6 @@ while numberWithoutTIRData == 1 and thisRun["totalRecordsProcessed"] < thisRun["
         thisRegistration["scientificname"] = tirRecord['properties']['scientificname'].replace("\'","''")
         tirRecord = recordToSearch["features"][0]
     
-        if tirRecord["properties"]["commonnames"] is not None:
-            thisRegistration["commonnames"] = []
-            for commonName in tirRecord["properties"]["commonnames"].split(","):
-                thisCommonName = {}
-                thisCommonName["commonname"] = bis.stringCleaning(commonName)
-                thisRegistration["commonnames"].append(thisCommonName)
-
-        if tirRecord["properties"]["taxonomicgroups"] is not None:
-            thisRegistration["taxonomicgroups"] = []
-            for taxonomicGroup in tirRecord["properties"]["taxonomicgroups"].split(","):
-                thisTaxonomicGroup = {}
-                thisTaxonomicGroup["taxonomicgroup"] = taxonomicGroup
-                thisRegistration["taxonomicgroups"].append(thisTaxonomicGroup)
-
-        if tirRecord["properties"]["stateyear"] is not None:
-            thisRegistration["stateyear"] = []
-            for stateYear in tirRecord["properties"]["stateyear"].split(","):
-                thisStateYear = {}
-                thisStateYear["state"] = stateYear.split("/")[0]
-                thisStateYear["year"] = stateYear.split("/")[1]
-                thisRegistration["stateyear"].append(thisStateYear)
-            
-
         display (thisRegistration)
         if thisRun["commitToDB"]:
             print (tir.tirRegistration(gc2.sqlAPI("DataDistillery","BCB"),json.dumps(thisRegistration)))
@@ -86,7 +63,7 @@ while numberWithoutTIRData == 1 and thisRun["totalRecordsProcessed"] < thisRun["
 # 
 # Check that the total number of SGCN registrations in the TIR match the total unique number of names in the SGCN table.
 
-# In[33]:
+# In[3]:
 
 q_uniqueSGCNNames = "SELECT COUNT(*) AS num FROM (SELECT DISTINCT scientificname_submitted FROM sgcn.sgcn) AS temp"
 r_uniqueSGCNNames = requests.get(gc2.sqlAPI("DataDistillery","BCB")+"&q="+q_uniqueSGCNNames).json()

@@ -26,7 +26,7 @@ from bis2 import gc2
 # 
 # A number of parameters are needed for the particular process being run through this script. We build a local dictionary to reference, mostly from functions in the BIS-specific modules.
 
-# In[9]:
+# In[7]:
 
 thisRun = {}
 thisRun["instance"] = "DataDistillery"
@@ -50,7 +50,7 @@ thisRun["commitItems"] = True
 # 
 # Note: This process might need to change if we end up with more than 100 items in the source repository. It might also change when we get to the point of submitting data along the DataDistillery messaging system.
 
-# In[10]:
+# In[8]:
 
 # Query ScienceBase for all SGCN source items
 sbQ = "https://www.sciencebase.gov/catalog/items?parentId=56d720ece4b015c306f442d5&format=json&fields=files,tags,dates&max=100&sort=lastUpdated&order=desc"+thisRun["extraCriteria"]
@@ -61,7 +61,7 @@ sbR = requests.get(sbQ).json()
 # 
 # This section uses a number of functions from the tir and sgcn modules to process each item returned in the ScienceBase query. There is probably some other stuff here that could be broken out into more generalized functions.
 
-# In[11]:
+# In[9]:
 
 # Loop through the repository items and sync data to SGCN database
 for item in sbR["items"]:
@@ -127,12 +127,8 @@ for item in sbR["items"]:
     
     if thisItem["stateYear"] in thisRun["reprocessList"]:
         thisItem["conditionsMet"].append(thisItem["stateYear"]+" in Reprocess List")
-
+    display (thisItem)
     if len(thisItem["conditionsMet"]) > 0:
-        if not thisRun["commitItems"]:
-            display (thisItem)
-            break
-
         thisItem["actionLog"] = []
         
         # Clear out the database for reprocessing
@@ -141,7 +137,7 @@ for item in sbR["items"]:
         
         # Set column names to lower case and strip white space to deal with lingering pesky human problems
         stateData.columns = map(str.lower, stateData.columns)
-#        stateData.columns = map(str.split, stateData.columns)
+        stateData.columns = map(str.strip, stateData.columns)
         
         # Create a list of duplicate index values in the Scientific Names so that we keep everything but make them all unique
         scientificNames = stateData["scientific name"]
